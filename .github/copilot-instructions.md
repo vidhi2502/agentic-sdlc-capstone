@@ -17,7 +17,7 @@ Each stage is a custom agent defined in `.github/agents/`, coordinated by an orc
 - Language: Java 17
 - Build tool: Maven
 - Testing: JUnit 5 (coverage via JaCoCo)
-- Hook scripts: single-file Java programs in .github/hooks/scripts/
+- Hook scripts: PowerShell scripts in .github/hooks/scripts/
 
 ## Rules for EVERY agent
 - Read the previous stage's artifact before starting. If it is missing, STOP and tell the user which stage must run first.
