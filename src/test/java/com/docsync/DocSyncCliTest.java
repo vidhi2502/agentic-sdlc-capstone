@@ -164,6 +164,42 @@ class DocSyncCliTest {
         assertFalse(stderr.toString(StandardCharsets.UTF_8).isBlank());
     }
 
+    @Test
+    void redactsSecretsFromProjectMetadataAndNeverListsSecretFiles() throws Exception {
+        Files.writeString(workingDirectory.resolve("pom.xml"), """
+                <project>
+                  <artifactId>demo</artifactId>
+                  <name>Demo</name>
+                  <description>token=embedded-secret</description>
+                  <properties><maven.compiler.source>17</maven.compiler.source></properties>
+                </project>
+                """);
+        Path sourceRoot = workingDirectory.resolve("src/main/java/example");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("Main.java"),
+                "package example; public class Main { public static void main(String[] args) {} }");
+        Files.writeString(sourceRoot.resolve(".env"), "AKIAIOSFODNN7EXAMPLE");
+        Files.writeString(sourceRoot.resolve("credentials.key"), "key-file-secret");
+        Files.writeString(sourceRoot.resolve("server.pem"), "pem-file-secret");
+        DocSyncCli cli = cli(new ScriptedUserPrompt(List.of()), successfulFakeProcess());
+
+        int exitCode = cli.run(
+                new String[] {"--skip-tests"},
+                workingDirectory,
+                printStream(new ByteArrayOutputStream()),
+                false);
+
+        String documentation = Files.readString(workingDirectory.resolve("DOCUMENTATION.md"));
+        assertEquals(0, exitCode);
+        assertTrue(documentation.contains("[REDACTED]"));
+        assertFalse(documentation.contains("embedded-secret"));
+        assertFalse(documentation.contains("AKIAIOSFODNN7EXAMPLE"));
+        assertFalse(documentation.contains("key-file-secret"));
+        assertFalse(documentation.contains("pem-file-secret"));
+        assertFalse(documentation.contains(".env"));
+        assertFalse(documentation.contains("credentials.key"));
+    }
+
     private DocSyncCli cli(ScriptedUserPrompt prompt, FakeProcessRunner process) {
         SecretGuard secretGuard = new SecretGuard();
         TestRunner testRunner = new TestRunner(

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,5 +77,22 @@ class JacocoReportReaderTest {
         writeReport("<report name=\"demo\"><counter type=\"LINE\" missed=\"0\" covered=\"0\"/></report>");
 
         assertTrue(reader.readLineCoverage(projectRoot).isEmpty());
+    }
+
+    @Test
+    void returnsEmptyForNegativeOrOverflowingCounters() throws IOException {
+        writeReport("<report><counter type=\"LINE\" missed=\"-1\" covered=\"2\"/></report>");
+
+        assertTrue(reader.readLineCoverage(projectRoot).isEmpty());
+        writeReport("<report><counter type=\"LINE\" missed=\"9223372036854775807\" covered=\"1\"/></report>");
+
+        assertTrue(reader.readLineCoverage(projectRoot).isEmpty());
+    }
+
+    @Test
+    void ignoresReportsNotModifiedAfterTheGivenTime() throws IOException {
+        writeReport("<report><counter type=\"LINE\" missed=\"1\" covered=\"1\"/></report>");
+
+        assertTrue(reader.readLineCoverage(projectRoot, Instant.now().plusSeconds(1)).isEmpty());
     }
 }

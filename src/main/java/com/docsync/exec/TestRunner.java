@@ -6,7 +6,9 @@ import com.docsync.report.SurefireReportReader;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -17,7 +19,6 @@ import java.util.Optional;
 public final class TestRunner {
 
     private static final Duration TEST_TIMEOUT = Duration.ofMinutes(5);
-    private static final List<String> TEST_COMMAND = List.of("mvn", "test");
 
     private final ProcessRunner processRunner;
     private final SurefireReportReader surefireReportReader;
@@ -55,8 +56,9 @@ public final class TestRunner {
         }
 
         ProcessResult processResult;
+        Instant runStartedAt = Instant.now();
         try {
-            processResult = processRunner.run(TEST_COMMAND, projectRoot, TEST_TIMEOUT);
+            processResult = processRunner.run(testCommand(), projectRoot, TEST_TIMEOUT);
         } catch (IOException e) {
             return unavailable("Unable to start Maven tests.");
         } catch (InterruptedException e) {
@@ -67,13 +69,16 @@ public final class TestRunner {
             return unavailable("Maven test execution timed out.");
         }
 
-        Optional<TestResult> reported = surefireReportReader.read(projectRoot);
+        Optional<TestResult> reported = surefireReportReader.read(projectRoot, runStartedAt);
         if (reported.isEmpty()) {
             return unavailable("No readable Surefire test report was found.");
         }
 
         TestResult counts = reported.orElseThrow();
-        Double coverage = jacocoReportReader.readLineCoverage(projectRoot).orElse(null);
+        if (processResult.exitCode() != 0 && counts.failed() == 0) {
+            return unavailable("Maven test execution failed without a Surefire failure report.");
+        }
+        Double coverage = jacocoReportReader.readLineCoverage(projectRoot, runStartedAt).orElse(null);
         TestResult completeResult = new TestResult(
                 counts.total(), counts.passed(), counts.failed(), counts.skipped(), coverage);
         return new TestRunResult(Optional.of(completeResult), List.of());
@@ -81,5 +86,13 @@ public final class TestRunner {
 
     private TestRunResult unavailable(String warning) {
         return new TestRunResult(Optional.empty(), List.of(warning));
+    }
+
+    private List<String> testCommand() {
+        String operatingSystem = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (operatingSystem.startsWith("windows")) {
+            return List.of("cmd.exe", "/d", "/c", "mvn.cmd", "test");
+        }
+        return List.of("mvn", "test");
     }
 }

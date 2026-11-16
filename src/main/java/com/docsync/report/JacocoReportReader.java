@@ -3,6 +3,8 @@ package com.docsync.report;
 import com.docsync.xml.SecureXmlParser;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -27,12 +29,28 @@ public final class JacocoReportReader {
      *         is absent, invalid or has no line counter; never throws
      */
     public Optional<Double> readLineCoverage(Path projectRoot) {
+        return readLineCoverage(projectRoot, Instant.MIN);
+    }
+
+    /**
+     * Reads line coverage only when the report was modified after the given
+     * time, avoiding values left by an earlier Maven invocation.
+     *
+     * @param projectRoot the folder being scanned
+     * @param modifiedAfter the report must have a later modification time
+     * @return line coverage percentage or empty when unavailable or stale
+     */
+    public Optional<Double> readLineCoverage(Path projectRoot, Instant modifiedAfter) {
+        Objects.requireNonNull(modifiedAfter, "modifiedAfter");
         Path reportFile = projectRoot.resolve(REPORT_FILE);
         if (!Files.isRegularFile(reportFile)) {
             return Optional.empty();
         }
         Element report;
         try {
+            if (!Files.getLastModifiedTime(reportFile).toInstant().isAfter(modifiedAfter)) {
+                return Optional.empty();
+            }
             report = SecureXmlParser.parseAllowingDoctype(reportFile).getDocumentElement();
         } catch (Exception e) {
             return Optional.empty();
@@ -62,12 +80,15 @@ public final class JacocoReportReader {
         try {
             long missed = Long.parseLong(counter.getAttribute("missed"));
             long covered = Long.parseLong(counter.getAttribute("covered"));
-            long total = missed + covered;
+            if (missed < 0 || covered < 0) {
+                return Optional.empty();
+            }
+            long total = Math.addExact(missed, covered);
             if (total <= 0) {
                 return Optional.empty();
             }
             return Optional.of(covered * 100.0 / total);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException | ArithmeticException e) {
             return Optional.empty();
         }
     }

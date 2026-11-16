@@ -7,6 +7,7 @@ import com.docsync.model.TestResult;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -77,5 +78,23 @@ class SurefireReportReaderTest {
         Optional<TestResult> result = reader.read(projectRoot);
 
         assertEquals(2, result.orElseThrow().total());
+    }
+
+    @Test
+    void returnsEmptyWhenCountersAreNegativeOrInconsistent() throws IOException {
+        writeReport("TEST-negative.xml",
+                "<testsuite tests=\"2\" failures=\"-1\" errors=\"0\" skipped=\"0\"/>");
+        writeReport("TEST-inconsistent.xml",
+                "<testsuite tests=\"2\" failures=\"1\" errors=\"0\" skipped=\"2\"/>");
+
+        assertTrue(reader.read(projectRoot).isEmpty());
+    }
+
+    @Test
+    void ignoresReportsNotModifiedAfterTheGivenTime() throws IOException {
+        writeReport("TEST-stale.xml",
+                "<testsuite tests=\"1\" failures=\"0\" errors=\"0\" skipped=\"0\"/>");
+
+        assertTrue(reader.read(projectRoot, Instant.now().plusSeconds(1)).isEmpty());
     }
 }

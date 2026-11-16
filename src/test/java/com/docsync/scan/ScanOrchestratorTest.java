@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.docsync.exec.FakeProcessRunner;
+import com.docsync.exec.ProcessRunner;
 import com.docsync.exec.ProcessResult;
 import com.docsync.exec.TestRunResult;
 import com.docsync.exec.TestRunner;
@@ -17,6 +18,8 @@ import com.docsync.security.SecretGuard;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -118,8 +121,21 @@ class ScanOrchestratorTest {
     }
 
     private ScanOrchestrator orchestrator() {
+        FakeProcessRunner fakeProcessRunner = FakeProcessRunner.returning(new ProcessResult(0, "", false));
+        ProcessRunner processRunner = (command, directory, timeout) -> {
+            ProcessResult result = fakeProcessRunner.run(command, directory, timeout);
+            Path surefireReport = directory.resolve("target/surefire-reports/TEST-example.xml");
+            if (Files.exists(surefireReport)) {
+                Files.setLastModifiedTime(surefireReport, FileTime.from(Instant.now().plusSeconds(1)));
+            }
+            Path jacocoReport = directory.resolve("target/site/jacoco/jacoco.xml");
+            if (Files.exists(jacocoReport)) {
+                Files.setLastModifiedTime(jacocoReport, FileTime.from(Instant.now().plusSeconds(1)));
+            }
+            return result;
+        };
         TestRunner testRunner = new TestRunner(
-                FakeProcessRunner.returning(new ProcessResult(0, "", false)),
+                processRunner,
                 new SurefireReportReader(),
                 new JacocoReportReader());
         return new ScanOrchestrator(

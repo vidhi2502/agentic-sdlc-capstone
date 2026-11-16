@@ -6,7 +6,10 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import org.w3c.dom.Element;
 
 /**
@@ -28,52 +31,100 @@ public final class SurefireReportReader {
      *         could be read; never throws
      */
     public Optional<TestResult> read(Path projectRoot) {
+        return read(projectRoot, Instant.MIN);
+    }
+
+    /**
+     * Aggregates reports modified after the given time, excluding stale
+     * reports left by an earlier Maven invocation.
+     *
+     * @param projectRoot the folder being scanned
+     * @param modifiedAfter reports must have a later modification time
+     * @return summed test counts, or empty when no fresh report could be read
+     */
+    public Optional<TestResult> read(Path projectRoot, Instant modifiedAfter) {
+        Objects.requireNonNull(modifiedAfter, "modifiedAfter");
         Path reportsDir = projectRoot.resolve(REPORTS_DIR);
         if (!Files.isDirectory(reportsDir)) {
             return Optional.empty();
         }
-        int total = 0;
-        int failed = 0;
-        int skipped = 0;
+        long total = 0;
+        long failed = 0;
+        long skipped = 0;
         boolean anyParsed = false;
         try (DirectoryStream<Path> reports = Files.newDirectoryStream(reportsDir, "*.xml")) {
             for (Path report : reports) {
-                Element testsuite = parseTestsuite(report);
-                if (testsuite != null) {
-                    total += intAttribute(testsuite, "tests");
-                    failed += intAttribute(testsuite, "failures") + intAttribute(testsuite, "errors");
-                    skipped += intAttribute(testsuite, "skipped");
+                if (!modifiedAfter(report, modifiedAfter)) {
+                    continue;
+                }
+                Optional<TestSuiteCounts> parsed = parseTestsuite(report);
+                if (parsed.isPresent()) {
+                    TestSuiteCounts counts = parsed.orElseThrow();
+                    total += counts.total();
+                    failed += counts.failed();
+                    skipped += counts.skipped();
                     anyParsed = true;
                 }
             }
         } catch (IOException e) {
             return Optional.empty();
         }
-        if (!anyParsed) {
+        if (!anyParsed
+                || total > Integer.MAX_VALUE
+                || failed > Integer.MAX_VALUE
+                || skipped > Integer.MAX_VALUE) {
             return Optional.empty();
         }
-        int passed = total - failed - skipped;
-        return Optional.of(new TestResult(total, passed, failed, skipped, null));
+        long passed = total - failed - skipped;
+        return Optional.of(new TestResult(
+                (int) total, (int) passed, (int) failed, (int) skipped, null));
+    }
+
+    private boolean modifiedAfter(Path report, Instant instant) {
+        try {
+            return Files.getLastModifiedTime(report).toInstant().isAfter(instant);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**
-     * Parses one report, returning its {@code <testsuite>} root or
-     * {@code null} when the file is not a valid Surefire report.
+     * Parses one report and validates the suite's test counters.
+     *
+     * @return counts when the report has consistent non-negative values
      */
-    private Element parseTestsuite(Path report) {
+    private Optional<TestSuiteCounts> parseTestsuite(Path report) {
         try {
             Element root = SecureXmlParser.parse(report).getDocumentElement();
-            return root.getNodeName().equals("testsuite") ? root : null;
+            if (!root.getNodeName().equals("testsuite")) {
+                return Optional.empty();
+            }
+            OptionalInt total = nonNegativeIntAttribute(root, "tests");
+            OptionalInt failures = nonNegativeIntAttribute(root, "failures");
+            OptionalInt errors = nonNegativeIntAttribute(root, "errors");
+            OptionalInt skipped = nonNegativeIntAttribute(root, "skipped");
+            if (total.isEmpty() || failures.isEmpty() || errors.isEmpty() || skipped.isEmpty()) {
+                return Optional.empty();
+            }
+            long failed = (long) failures.getAsInt() + errors.getAsInt();
+            if (failed + skipped.getAsInt() > total.getAsInt()) {
+                return Optional.empty();
+            }
+            return Optional.of(new TestSuiteCounts(total.getAsInt(), failed, skipped.getAsInt()));
         } catch (Exception e) {
-            return null;
+            return Optional.empty();
         }
     }
 
-    private int intAttribute(Element element, String name) {
+    private OptionalInt nonNegativeIntAttribute(Element element, String name) {
         try {
-            return Integer.parseInt(element.getAttribute(name));
+            int value = Integer.parseInt(element.getAttribute(name));
+            return value < 0 ? OptionalInt.empty() : OptionalInt.of(value);
         } catch (NumberFormatException e) {
-            return 0;
+            return OptionalInt.empty();
         }
+    }
+
+    private record TestSuiteCounts(int total, long failed, int skipped) {
     }
 }

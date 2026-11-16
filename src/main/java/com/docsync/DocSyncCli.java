@@ -76,14 +76,18 @@ public final class DocSyncCli {
             return 2;
         }
 
-        if (!isUsableDirectory(options.projectRoot())) {
-            warn(stderr, "Target folder must exist and be a readable directory.");
+        if (!isDirectory(options.projectRoot())) {
+            warn(stderr, "Target folder must exist and be a directory.");
             return 2;
         }
 
         try {
+            boolean readable = isReadableDirectory(options.projectRoot());
             boolean outputExists = outputWriter.documentationExists(options.projectRoot());
             boolean replaceExisting = options.force();
+            if (!readable) {
+                warn(stderr, "Target folder is not readable; generating partial documentation where possible.");
+            }
             if (outputExists && !options.force()) {
                 if (!interactive) {
                     warn(stderr, "DOCUMENTATION.md already exists; use --force to overwrite in non-interactive mode.");
@@ -103,13 +107,14 @@ public final class DocSyncCli {
                 replaceExisting = true;
             }
 
-            ScanResult scanResult = scanOrchestrator.scan(options.projectRoot(), options.skipTests());
+            ScanResult scanResult = scanOrchestrator.scan(
+                    options.projectRoot(), options.skipTests() || !readable);
             for (String warning : scanResult.warnings()) {
                 warn(stderr, warning);
             }
             String markdown = markdownRenderer.render(scanResult.projectInfo());
             outputWriter.writeConfirmed(options.projectRoot(), markdown, replaceExisting);
-            return scanResult.warnings().isEmpty() ? 0 : 1;
+            return readable && scanResult.warnings().isEmpty() ? 0 : 1;
         } catch (IOException e) {
             warn(stderr, "Unable to write DOCUMENTATION.md.");
             return 1;
@@ -205,9 +210,17 @@ public final class DocSyncCli {
         return new CliOptions(projectRoot.toAbsolutePath().normalize(), force, skipTests);
     }
 
-    private boolean isUsableDirectory(Path path) {
+    private boolean isDirectory(Path path) {
         try {
-            return Files.isDirectory(path) && Files.isReadable(path);
+            return Files.isDirectory(path);
+        } catch (SecurityException e) {
+            return false;
+        }
+    }
+
+    private boolean isReadableDirectory(Path path) {
+        try {
+            return Files.isReadable(path);
         } catch (SecurityException e) {
             return false;
         }
