@@ -9,4 +9,4 @@
 | 5 | implementation-agent | src/main/java, src/test/java | Approved | 97f0a30 | 2026-11-16 12:54 IST |
 | 6 | code-review-agent | docs/code-review.md | Approved | 852d0c8 | 2026-11-16 13:18 IST |
 | 7 | verification-agent | docs/verification-report.md | Approved | 88ef557 | 2026-11-16 13:26 IST |
-| 8 | pr-agent | Pull Request | Not Started | | |
+| 8 | pr-agent | [Pull Request](https://github.com/vidhi2502/agentic-sdlc-capstone/pull/1) | Approved | 7f419a7 | 2026-11-16 13:56 IST |
